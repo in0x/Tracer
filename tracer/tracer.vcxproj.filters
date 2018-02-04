@@ -12,9 +12,6 @@
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="stb_image.h">
-      <Filter>src</Filter>
-    </ClInclude>
     <ClInclude Include="stb_image_write.h">
       <Filter>src</Filter>
     </ClInclude>
