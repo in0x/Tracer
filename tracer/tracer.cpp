@@ -177,51 +177,95 @@ Vec3<T> cross(const Vec3<T>& lhs, const Vec3<T>& rhs)
 template<typename T>
 Vec3<T> reflect(const Vec3<T>& v, const Vec3<T>& n)
 {
-	return v - 2 * dot(v, n) * n;
+	return v - 2.0f * dot(v, n) * n;
 }
 
 typedef Vec3<float> Vec3f;
 
-struct Image
+struct Ray
 {
-	size_t width;
-	size_t height;
-	size_t components;
-	uint8_t* data;
+	Ray(const Vec3f& origin, const Vec3f direction)
+		: m_origin(origin)
+		, m_direction(direction) {}
+
+	Vec3f m_origin;
+	Vec3f m_direction;
 };
 
-Image createImage(size_t width, size_t height, size_t components)
+Vec3f pointAt(const Ray& ray, float t)
 {
-	assert(components == 3);
-	uint8_t* data = new uint8_t[width * height * components];
-	return Image{ width, height, components, data };
+	return ray.m_origin + ray.m_direction * t;
 }
 
-void writePixel(Image* image, size_t x, size_t y, uint8_t r, uint8_t g, uint8_t b)
+struct Image
+{
+	Image(size_t width, size_t height, size_t components)
+		: m_width(width)
+		, m_height(height)
+		, m_components(components)
+	{
+		assert(components == 3);
+		m_data = new uint8_t[width * height * components];
+	}
+
+	~Image()
+	{
+		delete[] m_data;
+	}
+
+	size_t m_width;
+	size_t m_height;
+	size_t m_components;
+	uint8_t* m_data;
+};
+
+
+void writePixel(Image& image, size_t x, size_t y, uint8_t r, uint8_t g, uint8_t b)
 {
 	size_t bytesToWrite = sizeof(int8_t) * 3;
-	size_t start = x * image->components + y * image->width * image->components;
-	
-	uint8_t pixel[3] = {r, g, b};
-	
-	memcpy(reinterpret_cast<char*>(image->data) + start, pixel, bytesToWrite);
+	size_t start = x * image.m_components + y * image.m_width * image.m_components;
+
+	uint8_t pixel[3] = { r, g, b };
+
+	memcpy(reinterpret_cast<char*>(image.m_data) + start, pixel, bytesToWrite);
 }
 
-void destroyImage(Image* image)
-{
-	delete[] image->data;
-}
-
-bool saveImage(const Image* image, const char* filePath)
+bool saveImage(const Image& image, const char* filePath)
 {
 	return stbi_write_png(
 		filePath,
-		image->width,
-		image->height,
-		image->components,
-		image->data,
-		image->width * image->components) != STB_IMAGE_WRITE_ERROR;
+		image.m_width,
+		image.m_height,
+		image.m_components,
+		image.m_data,
+		image.m_width * image.m_components) != STB_IMAGE_WRITE_ERROR;
 }
+
+//typedef void(*interactFPtr)(const Vec3f& dir);
+//
+//struct object
+//{
+//	interactFPtr interactMethod;
+//};
+//
+//void interact(object* objects, size_t numObjects, Vec3f& dir)
+//{
+//	for (size_t i = 0; i < numObjects; ++i)
+//	{
+//		objects[i].interactMethod(dir);
+//	}
+//}
+
+/*
+	+y
+	|
+	| /-z
+	|/______ +x
+	/
+   /+z
+
+   Camera uses right handed coordinate system.
+*/
 
 int main()
 {
@@ -229,7 +273,7 @@ int main()
 	int height = 100;
 	int components = 3;
 
-	Image image = createImage(width, height, components);
+	Image image(width, height, components);
 
 	for (int pixel_y = 0; pixel_y < height; ++pixel_y)
 	{
@@ -241,15 +285,13 @@ int main()
 			rgb.z = 0.2f;
 			rgb *= 255.99;
 
-			writePixel(&image, pixel_x, pixel_y, rgb.x, rgb.y, rgb.z);
+			writePixel(image, pixel_x, (height - 1) - pixel_y, rgb.x, rgb.y, rgb.z);
 		}
 	}
 
-	bool success = saveImage(&image, "render.png");
-	assert(success);
+	bool bWasWritten = saveImage(image, "render.png");
+	assert(bWasWritten);
 	
-	destroyImage(&image);
-
 	return 0;
 }
 
