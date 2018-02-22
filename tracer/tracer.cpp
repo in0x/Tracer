@@ -171,7 +171,7 @@ Vec3<T> cross(const Vec3<T>& lhs, const Vec3<T>& rhs)
 		lhs.y * rhs.z - lhs.z * rhs.y,
 		-(lhs.x * rhs.z - lhs.z * rhs.x),
 		lhs.x * rhs.y - lhs.y * rhs.x
-	);
+		);
 }
 
 template<typename T>
@@ -213,48 +213,32 @@ struct Image
 		delete[] m_data;
 	}
 
+	void writePixel(size_t x, size_t y, uint8_t r, uint8_t g, uint8_t b)
+	{
+		size_t bytesToWrite = sizeof(int8_t) * 3;
+		size_t start = x * m_components + y * m_width * m_components;
+
+		uint8_t pixel[3] = { r, g, b };
+
+		memcpy(reinterpret_cast<char*>(m_data) + start, pixel, bytesToWrite);
+	}
+
+	bool save(const char* filePath) const
+	{
+		return stbi_write_png(
+			filePath,
+			m_width,
+			m_height,
+			m_components,
+			m_data,
+			m_width * m_components) != STB_IMAGE_WRITE_ERROR;
+	}
+
 	size_t m_width;
 	size_t m_height;
 	size_t m_components;
 	uint8_t* m_data;
 };
-
-
-void writePixel(Image& image, size_t x, size_t y, uint8_t r, uint8_t g, uint8_t b)
-{
-	size_t bytesToWrite = sizeof(int8_t) * 3;
-	size_t start = x * image.m_components + y * image.m_width * image.m_components;
-
-	uint8_t pixel[3] = { r, g, b };
-
-	memcpy(reinterpret_cast<char*>(image.m_data) + start, pixel, bytesToWrite);
-}
-
-bool saveImage(const Image& image, const char* filePath)
-{
-	return stbi_write_png(
-		filePath,
-		image.m_width,
-		image.m_height,
-		image.m_components,
-		image.m_data,
-		image.m_width * image.m_components) != STB_IMAGE_WRITE_ERROR;
-}
-
-//typedef void(*interactFPtr)(const Vec3f& dir);
-//
-//struct object
-//{
-//	interactFPtr interactMethod;
-//};
-//
-//void interact(object* objects, size_t numObjects, Vec3f& dir)
-//{
-//	for (size_t i = 0; i < numObjects; ++i)
-//	{
-//		objects[i].interactMethod(dir);
-//	}
-//}
 
 /*
 	+y
@@ -267,6 +251,46 @@ bool saveImage(const Image& image, const char* filePath)
    Camera uses right handed coordinate system.
 */
 
+struct Camera
+{
+	Camera(Vec3f rayOrigin, Vec3f lowerLeft, Vec3f horizontal, Vec3f vertical)
+		: m_rayOrigin(rayOrigin)
+		, m_lowerLeft(lowerLeft)
+		, m_horizontal(horizontal)
+		, m_vertical(vertical)
+	{}
+
+	Vec3f m_rayOrigin;
+	Vec3f m_lowerLeft;
+	Vec3f m_horizontal;
+	Vec3f m_vertical;
+};
+
+Ray getRayThroughPixel(const Camera& camera, int pixelX, int pixelY, int widthPixels, int heightPixels)
+{
+	float u = (float)pixelX / float(widthPixels);
+	float v = (float)pixelY / float(heightPixels);
+
+	return Ray(camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical);
+}
+
+template<typename T>
+T lerp(float t, T a, T b)
+{
+	return (1.0f - t) * a + t * b;
+}
+
+Vec3f colorFromRay(const Ray& ray)
+{
+	Vec3f dirUnit = normalized(ray.m_direction);
+	float t = 0.5f * (dirUnit.y + 1.0f);
+
+	Vec3f white(1.0f, 1.0f, 1.0f);
+	Vec3f skyBlue(0.5f, 0.7f, 1.0f);
+
+	return lerp(t, white, skyBlue);
+}
+
 int main()
 {
 	int width = 200;
@@ -275,23 +299,28 @@ int main()
 
 	Image image(width, height, components);
 
+	Vec3f origin(0.0f, 0.0f, 0.0f);
+	Vec3f lowerLeft(-2.0f, -1.0f, -1.0f);
+	Vec3f horizontal(4.0f, 0.0f, 0.0f);
+	Vec3f vertical(0.0f, 2.0f, 0.0f);
+	const Camera camera(origin, lowerLeft, horizontal, vertical);
+
 	for (int pixel_y = 0; pixel_y < height; ++pixel_y)
 	{
 		for (int pixel_x = 0; pixel_x < width; ++pixel_x)
 		{
-			Vec3f rgb;
-			rgb.x = float(pixel_x) / float(width);
-			rgb.y = float(pixel_y) / float(height);
-			rgb.z = 0.2f;
-			rgb *= 255.99;
+			Ray ray = getRayThroughPixel(camera, pixel_x, pixel_y, image.m_width, image.m_height);
 
-			writePixel(image, pixel_x, (height - 1) - pixel_y, rgb.x, rgb.y, rgb.z);
+			Vec3f rgb = colorFromRay(ray);
+			rgb *= 255.99f;
+
+			image.writePixel(pixel_x, (height - 1) - pixel_y, rgb.x, rgb.y, rgb.z);
 		}
 	}
 
-	bool bWasWritten = saveImage(image, "render.png");
+	bool bWasWritten = image.save("render.png");
 	assert(bWasWritten);
-	
+
 	return 0;
 }
 
