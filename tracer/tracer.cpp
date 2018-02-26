@@ -4,183 +4,16 @@
 #define STB_IMAGE_WRITE_ERROR 0
 
 #include "stb_image_write.h"
+#include "Vec3.h"
 #include <cstdint>
 #include <cassert>
+#include <vector>
 
 template<typename T>
-struct Vec3
+T lerp(float t, T a, T b)
 {
-public:
-	Vec3() : x(0.f), y(0.f), z(0.f) {}
-	Vec3(T _x, T _y, T _z) : x(_x), y(_y), z(_z) {}
-
-	T x;
-	T y;
-	T z;
-
-	Vec3 operator-() const
-	{
-		return Vec3(-x, -y, -z);
-	};
-
-	bool operator==(const Vec3& rhs)
-	{
-		return x == rhs.x && y == rhs.y && z == rhs.z;
-	}
-
-	Vec3& operator+=(const Vec3& rhs)
-	{
-		x += rhs.x;
-		y += rhs.y;
-		z += rhs.z;
-		return *this;
-	}
-
-	Vec3& operator-=(const Vec3& rhs)
-	{
-		x -= rhs.x;
-		y -= rhs.y;
-		z -= rhs.z;
-		return *this;
-	}
-
-	Vec3& operator*=(const Vec3& rhs)
-	{
-		x *= rhs.x;
-		y *= rhs.y;
-		z *= rhs.z;
-		return *this;
-	}
-
-	Vec3& operator/=(const Vec3& rhs)
-	{
-		x /= rhs.x;
-		y /= rhs.y;
-		z /= rhs.z;
-		return *this;
-	}
-
-	Vec3& operator*=(const T t)
-	{
-		x *= t;
-		y *= t;
-		z *= t;
-		return *this;
-	}
-
-	Vec3& operator/=(const T t)
-	{
-		x /= t;
-		y /= t;
-		z /= t;
-		return *this;
-	}
-};
-
-template<typename T>
-T length(const Vec3<T>& vec)
-{
-	return sqrt(vec.x*vec.x + vec.y*vec.y + vec.z*vec.z);
+	return (1.0f - t) * a + t * b;
 }
-
-template<typename T>
-T length2(const Vec3<T>& vec)
-{
-	return vec.x*vec.x + vec.y*vec.y + vec.z*vec.z;
-}
-
-template<typename T>
-inline Vec3<T> operator+(Vec3<T> lhs, const Vec3<T>& rhs)
-{
-	lhs += rhs;
-	return lhs;
-}
-
-template<typename T>
-inline Vec3<T> operator-(Vec3<T> lhs, const Vec3<T>& rhs)
-{
-	lhs -= rhs;
-	return lhs;
-}
-
-template<typename T>
-inline Vec3<T> operator*(Vec3<T> lhs, const Vec3<T>& rhs)
-{
-	lhs *= rhs;
-	return lhs;
-}
-
-template<typename T>
-inline Vec3<T> operator/(Vec3<T> lhs, const Vec3<T>& rhs)
-{
-	lhs /= rhs;
-	return lhs;
-}
-
-template<typename T>
-inline Vec3<T> operator*(Vec3<T> lhs, T rhs)
-{
-	lhs *= rhs;
-	return lhs;
-}
-
-template<typename T>
-inline Vec3<T> operator/(Vec3<T> lhs, T rhs)
-{
-	lhs /= rhs;
-	return lhs;
-}
-
-template<typename T>
-inline Vec3<T> operator*(T lhs, Vec3<T> rhs)
-{
-	rhs *= lhs;
-	return rhs;
-}
-
-template<typename T>
-inline Vec3<T> operator/(T lhs, Vec3<T>&rhs)
-{
-	rhs /= lhs;
-	return rhs;
-}
-
-template<typename T>
-void normalize(Vec3<T>& vec)
-{
-	T len = 1 / length(vec);
-	vec *= len;
-}
-
-template<typename T>
-Vec3<T> normalized(const Vec3<T>& vec)
-{
-	return vec / length(vec);
-}
-
-template<typename T>
-T dot(const Vec3<T>& lhs, const Vec3<T>& rhs)
-{
-	return lhs.x * rhs.x + lhs.y * rhs.y + lhs.z * rhs.z;
-}
-
-template<typename T>
-Vec3<T> cross(const Vec3<T>& lhs, const Vec3<T>& rhs)
-{
-	return Vec3<T>(
-		lhs.y * rhs.z - lhs.z * rhs.y,
-		-(lhs.x * rhs.z - lhs.z * rhs.x),
-		lhs.x * rhs.y - lhs.y * rhs.x
-		);
-}
-
-template<typename T>
-Vec3<T> reflect(const Vec3<T>& v, const Vec3<T>& n)
-{
-	return v - 2.0f * dot(v, n) * n;
-}
-
-typedef Vec3<float> Vec3f;
 
 struct Ray
 {
@@ -274,14 +107,67 @@ Ray getRayThroughPixel(const Camera& camera, int pixelX, int pixelY, int widthPi
 	return Ray(camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical);
 }
 
-template<typename T>
-T lerp(float t, T a, T b)
+struct Sphere
 {
-	return (1.0f - t) * a + t * b;
+	Sphere(const Vec3f& position, float radius)
+		: m_position(position)
+		, m_radius(radius)
+	{}
+
+	Vec3f m_position;
+	float m_radius;
+};
+
+struct Intersection
+{
+	float m_tAt;
+	Vec3f m_point;
+	Vec3f m_normal;
+};
+
+Intersection intersectSphere(const Sphere& sphere, const Ray& ray)
+{
+	Vec3f toCenter = ray.m_origin - sphere.m_position;
+
+	float a = dot(ray.m_direction, ray.m_direction);
+	float b = dot(toCenter, ray.m_direction);
+	float c = dot(toCenter, toCenter) - sphere.m_radius * sphere.m_radius;
+
+	float discriminant = b * b - a * c;
+
+	Intersection intersect;
+
+	if (discriminant > 0.0f)
+	{
+		intersect.m_tAt = (-b - sqrt(discriminant)) / a;
+		intersect.m_point = pointAt(ray, intersect.m_tAt);
+		intersect.m_normal = (intersect.m_point - sphere.m_position) / sphere.m_radius;
+	}
+	else
+	{
+		intersect.m_tAt = -1.0f;
+	}
+
+	return intersect;
 }
 
-Vec3f colorFromRay(const Ray& ray)
+struct World
 {
+	std::vector<Sphere> m_spheres;
+};
+
+Vec3f colorFromRay(const World& world, const Ray& ray)
+{
+	for (const Sphere& sphere : world.m_spheres)
+	{
+		Intersection intersect = intersectSphere(sphere, ray);
+
+		if (intersect.m_tAt > 0.0f)
+		{
+			return 0.5f * (intersect.m_normal + 1.0f);
+		}
+	}
+
 	Vec3f dirUnit = normalized(ray.m_direction);
 	float t = 0.5f * (dirUnit.y + 1.0f);
 
@@ -293,10 +179,9 @@ Vec3f colorFromRay(const Ray& ray)
 
 int main()
 {
-	int width = 200;
-	int height = 100;
+	int width = 600;
+	int height = 300;
 	int components = 3;
-
 	Image image(width, height, components);
 
 	Vec3f origin(0.0f, 0.0f, 0.0f);
@@ -305,13 +190,16 @@ int main()
 	Vec3f vertical(0.0f, 2.0f, 0.0f);
 	const Camera camera(origin, lowerLeft, horizontal, vertical);
 
+	World world;
+	world.m_spheres.emplace_back(Vec3f(0.0f, 0.0f, -1.0f), 0.5f);
+
 	for (int pixel_y = 0; pixel_y < height; ++pixel_y)
 	{
 		for (int pixel_x = 0; pixel_x < width; ++pixel_x)
 		{
 			Ray ray = getRayThroughPixel(camera, pixel_x, pixel_y, image.m_width, image.m_height);
 
-			Vec3f rgb = colorFromRay(ray);
+			Vec3f rgb = colorFromRay(world, ray); 
 			rgb *= 255.99f;
 
 			image.writePixel(pixel_x, (height - 1) - pixel_y, rgb.x, rgb.y, rgb.z);
