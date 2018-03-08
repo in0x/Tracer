@@ -5,9 +5,45 @@
 
 #include "stb_image_write.h"
 #include "Vec3.h"
-#include <cstdint>
-#include <cassert>
+
+#include <stdint.h>
+#include <assert.h>
+#include <time.h>
 #include <vector>
+
+#define EXPAND_HELPER(x) #x
+#define EXPAND(x) EXPAND_HELPER(x)
+#define __LOCATION_INFO__ "In: " __FILE__ "\nAt: " EXPAND(__LINE__) ", " __FUNCTION__ "() "
+#define LOG(x) printf(x __LOCATION_INFO__)
+
+void initRand()
+{
+	srand(time(0));
+}
+
+float randDecimal()
+{
+	return (float)rand() / (float)RAND_MAX;
+}
+
+float randInRange(float min, float max)
+{
+	return (((float)rand() - min) / (float)RAND_MAX) * (max - min) + min;
+}
+
+Vec3f randInUnitSphere()
+{
+	Vec3f point;
+
+	do
+	{
+		point.x = randInRange(-1.0f, 1.0f);
+		point.y = randInRange(-1.0f, 1.0f);
+		point.z = randInRange(-1.0f, 1.0f);
+	} while (length2(point) >= 1.0f);
+
+	return point;
+}
 
 template<typename T>
 T lerp(float t, T a, T b)
@@ -107,13 +143,16 @@ Ray getRayThroughPixel(const Camera& camera, int pixelX, int pixelY, int widthPi
 	return Ray(camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical);
 }
 
+Ray getRayThroughPixelSuperSampled(const Camera& camera, int pixelX, int pixelY, int widthPixels, int heightPixels)
+{
+	float u = ((float)pixelX + randDecimal()) / float(widthPixels);
+	float v = ((float)pixelY + randDecimal()) / float(heightPixels);
+
+	return Ray(camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical);
+}
+
 struct Sphere
 {
-	Sphere(const Vec3f& position, float radius)
-		: m_position(position)
-		, m_radius(radius)
-	{}
-
 	Vec3f m_position;
 	float m_radius;
 };
@@ -123,6 +162,28 @@ struct Intersection
 	float m_tAt;
 	Vec3f m_point;
 	Vec3f m_normal;
+};
+
+struct Material
+{
+	typedef size_t ID;
+
+	Vec3f albedo;
+};
+
+struct Object
+{
+	union
+	{
+		Sphere sphere;
+	} m_collision;
+
+	enum
+	{
+		COL_SPHERE
+	} m_collisionType;
+
+	Material::ID m_material;
 };
 
 Intersection intersectSphere(const Sphere& sphere, const Ray& ray)
@@ -153,54 +214,121 @@ Intersection intersectSphere(const Sphere& sphere, const Ray& ray)
 
 struct World
 {
-	std::vector<Sphere> m_spheres;
-};
+	std::vector<Object> m_objects;
+	std::vector<Material> m_materials;
 
-Vec3f colorFromRay(const World& world, const Ray& ray)
-{
-	for (const Sphere& sphere : world.m_spheres)
+	Material::ID m_defaultMatID = std::numeric_limits<size_t>::max();
+
+	void addSphere(const Vec3f& position, float radius)
 	{
-		Intersection intersect = intersectSphere(sphere, ray);
+		Object object;
 
-		if (intersect.m_tAt > 0.0f)
-		{
-			return 0.5f * (intersect.m_normal + 1.0f);
-		}
+		object.m_collision.sphere.m_position = position;
+		object.m_collision.sphere.m_radius = radius;
+		object.m_collisionType = Object::COL_SPHERE;
+		object.m_material = m_defaultMatID;
+		m_objects.emplace_back(object);
 	}
 
+	Material::ID addMaterial(const Material& material)
+	{
+		m_materials.push_back(material);
+		return  m_materials.size() - 1;
+	}
+
+	// As with everything, consider offering move here later.
+	Material::ID setDefaultMaterial(const Material& defaultMaterial)
+	{
+		m_defaultMatID = addMaterial(defaultMaterial);
+		return m_defaultMatID;
+	}
+};
+
+Intersection intersectObject(const Object& object, const Ray& ray)
+{
+	Intersection intersect;
+
+	switch (object.m_collisionType)
+	{
+	case Object::COL_SPHERE:
+		intersect = intersectSphere(object.m_collision.sphere, ray);
+		break;
+
+	default:
+		LOG("Unhandled collision type");
+		assert(false);
+		break;
+	}
+
+	return intersect;
+}
+
+Vec3f getSkyColor(const Ray& ray)
+{
 	Vec3f dirUnit = normalized(ray.m_direction);
 	float t = 0.5f * (dirUnit.y + 1.0f);
 
-	Vec3f white(1.0f, 1.0f, 1.0f);
-	Vec3f skyBlue(0.5f, 0.7f, 1.0f);
+	Vec3f white{ 1.0f, 1.0f, 1.0f };
+	Vec3f skyBlue{ 0.5f, 0.7f, 1.0f };
 
 	return lerp(t, white, skyBlue);
 }
 
+Vec3f colorFromRay(const World& world, const Ray& ray, float tMin, float tMax)
+{
+	for (const Object& object : world.m_objects)
+	{
+		Intersection intersect = intersectObject(object, ray);
+
+		if (intersect.m_tAt > 0.0f && intersect.m_tAt > tMin && intersect.m_tAt < tMax)
+		{
+			Vec3f target = intersect.m_point + intersect.m_normal + randInUnitSphere();
+			return 0.5f * colorFromRay(world, Ray(intersect.m_point, target - intersect.m_point), tMin, tMax);
+		}
+	}
+
+	return getSkyColor(ray);
+}
+
 int main()
 {
+	initRand();
+
 	int width = 600;
 	int height = 300;
 	int components = 3;
 	Image image(width, height, components);
 
-	Vec3f origin(0.0f, 0.0f, 0.0f);
-	Vec3f lowerLeft(-2.0f, -1.0f, -1.0f);
-	Vec3f horizontal(4.0f, 0.0f, 0.0f);
-	Vec3f vertical(0.0f, 2.0f, 0.0f);
+	Vec3f origin{ 0.0f, 0.0f, 0.0f };
+	Vec3f lowerLeft{ -2.0f, -1.0f, -1.0f };
+	Vec3f horizontal{ 4.0f, 0.0f, 0.0f };
+	Vec3f vertical{ 0.0f, 2.0f, 0.0f };
 	const Camera camera(origin, lowerLeft, horizontal, vertical);
 
+	const int aaSamples = 2;
+
 	World world;
-	world.m_spheres.emplace_back(Vec3f(0.0f, 0.0f, -1.0f), 0.5f);
+	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f);
+	world.addSphere(Vec3f{ 0.0f, -100.5f, -1.0f }, 100.0f);
+
+	const float tIntersectMin = 0.001f; // Helps with self shadowing.
+	const float tIntersectMax = FLT_MAX;
 
 	for (int pixel_y = 0; pixel_y < height; ++pixel_y)
 	{
 		for (int pixel_x = 0; pixel_x < width; ++pixel_x)
 		{
-			Ray ray = getRayThroughPixel(camera, pixel_x, pixel_y, image.m_width, image.m_height);
+			Vec3f rgb{ 0,0,0 };
 
-			Vec3f rgb = colorFromRay(world, ray); 
-			rgb *= 255.99f;
+			for (int i = 0; i < aaSamples; ++i)
+			{
+				Ray ray = getRayThroughPixelSuperSampled(camera, pixel_x, pixel_y, image.m_width, image.m_height);
+				rgb += colorFromRay(world, ray, tIntersectMin, tIntersectMax);
+			}
+
+			rgb /= (float)aaSamples; // Average over aa samples.
+			rgb.x = sqrt(rgb.x); rgb.y = sqrt(rgb.y); rgb.z = sqrt(rgb.z); // Gamma2 correct.
+			rgb *= 255.99f; // Move up to 0 <-> 255 range.
 
 			image.writePixel(pixel_x, (height - 1) - pixel_y, rgb.x, rgb.y, rgb.z);
 		}
