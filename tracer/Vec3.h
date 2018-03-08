@@ -4,9 +4,6 @@ template<typename T>
 struct Vec3
 {
 public:
-	Vec3() : x(0.f), y(0.f), z(0.f) {}
-	Vec3(T _x, T _y, T _z) : x(_x), y(_y), z(_z) {}
-
 	T x;
 	T y;
 	T z;
