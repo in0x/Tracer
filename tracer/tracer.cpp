@@ -53,10 +53,6 @@ T lerp(float t, T a, T b)
 
 struct Ray
 {
-	Ray(const Vec3f& origin, const Vec3f direction)
-		: m_origin(origin)
-		, m_direction(direction) {}
-
 	Vec3f m_origin;
 	Vec3f m_direction;
 };
@@ -122,13 +118,6 @@ struct Image
 
 struct Camera
 {
-	Camera(Vec3f rayOrigin, Vec3f lowerLeft, Vec3f horizontal, Vec3f vertical)
-		: m_rayOrigin(rayOrigin)
-		, m_lowerLeft(lowerLeft)
-		, m_horizontal(horizontal)
-		, m_vertical(vertical)
-	{}
-
 	Vec3f m_rayOrigin;
 	Vec3f m_lowerLeft;
 	Vec3f m_horizontal;
@@ -140,15 +129,15 @@ Ray getRayThroughPixel(const Camera& camera, int pixelX, int pixelY, int widthPi
 	float u = (float)pixelX / float(widthPixels);
 	float v = (float)pixelY / float(heightPixels);
 
-	return Ray(camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical);
+	return Ray{ camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical };
 }
 
-Ray getRayThroughPixelSuperSampled(const Camera& camera, int pixelX, int pixelY, int widthPixels, int heightPixels)
+Ray getRayThroughPixelSubSampled(const Camera& camera, int pixelX, int pixelY, int widthPixels, int heightPixels)
 {
 	float u = ((float)pixelX + randDecimal()) / float(widthPixels);
 	float v = ((float)pixelY + randDecimal()) / float(heightPixels);
 
-	return Ray(camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical);
+	return Ray{ camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical };
 }
 
 struct Sphere
@@ -167,8 +156,10 @@ struct Intersection
 struct Material
 {
 	typedef size_t ID;
+	typedef void(ScatterFunc)(const Material& material, const Intersection& interesect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation);
 
-	Vec3f albedo;
+	Vec3f m_albedo;
+	ScatterFunc* m_scatterFunc;
 };
 
 struct Object
@@ -183,7 +174,7 @@ struct Object
 		COL_SPHERE
 	} m_collisionType;
 
-	Material::ID m_material;
+	Material::ID m_materialID;
 };
 
 Intersection intersectSphere(const Sphere& sphere, const Ray& ray)
@@ -221,25 +212,30 @@ struct World
 
 	void addSphere(const Vec3f& position, float radius)
 	{
+		addSphere(position, radius, m_defaultMatID);
+	}
+
+	void addSphere(const Vec3f& position, float radius, Material::ID material)
+	{
 		Object object;
 
 		object.m_collision.sphere.m_position = position;
 		object.m_collision.sphere.m_radius = radius;
 		object.m_collisionType = Object::COL_SPHERE;
-		object.m_material = m_defaultMatID;
+		object.m_materialID = material;
 		m_objects.emplace_back(object);
 	}
 
-	Material::ID addMaterial(const Material& material)
+	Material::ID addMaterial(Vec3f albedo, Material::ScatterFunc* scatterFunc)
 	{
-		m_materials.push_back(material);
+		m_materials.push_back({ albedo, scatterFunc }); // TODO() Why cant we use emplace_back here ...
 		return  m_materials.size() - 1;
 	}
 
 	// As with everything, consider offering move here later.
-	Material::ID setDefaultMaterial(const Material& defaultMaterial)
+	Material::ID setDefaultMaterial(Vec3f albedo, Material::ScatterFunc* scatterFunc)
 	{
-		m_defaultMatID = addMaterial(defaultMaterial);
+		m_defaultMatID = addMaterial(albedo, scatterFunc);
 		return m_defaultMatID;
 	}
 };
@@ -263,6 +259,28 @@ Intersection intersectObject(const Object& object, const Ray& ray)
 	return intersect;
 }
 
+const Object* intersectWorld(const World& world, const Ray& ray, Intersection& outIntersect, float tMin, float tMax)
+{
+	Intersection intersect;
+	const Object* hitObject = nullptr;
+
+	float closestT = tMax;
+
+	for (const Object& object : world.m_objects)
+	{
+		intersect = intersectObject(object, ray);
+
+		if (intersect.m_tAt > tMin && intersect.m_tAt < closestT)
+		{
+			outIntersect = intersect;
+			hitObject = &object;
+			closestT = intersect.m_tAt;
+		}
+	}
+
+	return hitObject;
+}
+
 Vec3f getSkyColor(const Ray& ray)
 {
 	Vec3f dirUnit = normalized(ray.m_direction);
@@ -274,20 +292,53 @@ Vec3f getSkyColor(const Ray& ray)
 	return lerp(t, white, skyBlue);
 }
 
-Vec3f colorFromRay(const World& world, const Ray& ray, float tMin, float tMax)
+Vec3f colorFromRay(const World& world, const Ray& ray, int bounces, int maxBounces, float tMin, float tMax)
 {
-	for (const Object& object : world.m_objects)
-	{
-		Intersection intersect = intersectObject(object, ray);
+	Intersection intersect;
 
-		if (intersect.m_tAt > 0.0f && intersect.m_tAt > tMin && intersect.m_tAt < tMax)
+	if (const Object* hitObject = intersectWorld(world, ray, intersect, tMin, tMax))
+	{
+		const Material& material = world.m_materials[hitObject->m_materialID];
+
+		Ray scattered;
+		Vec3f attenuation;
+		material.m_scatterFunc(material, intersect, ray, scattered, attenuation);
+
+		if (bounces < maxBounces && length2(attenuation) > 0.0f)
 		{
-			Vec3f target = intersect.m_point + intersect.m_normal + randInUnitSphere();
-			return 0.5f * colorFromRay(world, Ray(intersect.m_point, target - intersect.m_point), tMin, tMax);
+			return attenuation * colorFromRay(world, scattered, bounces + 1, maxBounces, tMin, tMax);
+		}
+		else
+		{
+			return Vec3f{ 0,0,0 };
 		}
 	}
+	else
+	{
+		return getSkyColor(ray);
+	}
+}
 
-	return getSkyColor(ray);
+void scatterDiffuse(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
+{
+	Vec3f target = intersect.m_point + intersect.m_normal + randInUnitSphere();
+	rayOut = { intersect.m_point, target - intersect.m_point };
+	attenuation = material.m_albedo;
+}
+
+void scatterMetal(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
+{
+	Vec3f reflected = reflect(normalized(rayIn.m_direction), intersect.m_normal);
+	rayOut = { intersect.m_point, reflected };
+
+	if (dot(rayOut.m_direction, intersect.m_normal) > 0)
+	{
+		attenuation = material.m_albedo;
+	}
+	else
+	{
+		attenuation = { 0.0f, 0.0f, 0.0f };
+	}
 }
 
 int main()
@@ -299,20 +350,29 @@ int main()
 	int components = 3;
 	Image image(width, height, components);
 
-	Vec3f origin{ 0.0f, 0.0f, 0.0f };
-	Vec3f lowerLeft{ -2.0f, -1.0f, -1.0f };
-	Vec3f horizontal{ 4.0f, 0.0f, 0.0f };
-	Vec3f vertical{ 0.0f, 2.0f, 0.0f };
-	const Camera camera(origin, lowerLeft, horizontal, vertical);
+	Camera camera;
+	camera.m_rayOrigin = { 0.0f, 0.0f, 0.0f };
+	camera.m_lowerLeft = { -2.0f, -1.0f, -1.0f };
+	camera.m_horizontal = { 4.0f, 0.0f, 0.0f };
+	camera.m_vertical = { 0.0f, 2.0f, 0.0f };
 
-	const int aaSamples = 2;
+	const int aaSamples = 4;
 
 	World world;
-	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f);
-	world.addSphere(Vec3f{ 0.0f, -100.5f, -1.0f }, 100.0f);
+
+	Material::ID redDiffuse = world.setDefaultMaterial(Vec3f{ 0.8f, 0.3f, 0.3f }, &scatterDiffuse);
+	Material::ID yellowDiffuse = world.setDefaultMaterial(Vec3f{ 0.8f, 0.8f, 0.0f }, &scatterDiffuse);
+	Material::ID silver = world.setDefaultMaterial(Vec3f{ 0.8f, 0.8f, 0.8f }, &scatterMetal);
+	Material::ID gold = world.setDefaultMaterial(Vec3f{ 0.8f, 0.6f, 0.2f }, &scatterMetal);
+
+	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f, redDiffuse);
+	world.addSphere(Vec3f{ 0.0f, -100.5f, -1.0f }, 100.0f, yellowDiffuse);
+	world.addSphere(Vec3f{ 1.0f, 0.0f, -1.0f }, 0.5f, gold);
+	world.addSphere(Vec3f{ -1.0f, 0.0f, -1.0f }, 0.5f, silver);
 
 	const float tIntersectMin = 0.001f; // Helps with self shadowing.
 	const float tIntersectMax = FLT_MAX;
+	const int maxRayBounces = 50;
 
 	for (int pixel_y = 0; pixel_y < height; ++pixel_y)
 	{
@@ -322,8 +382,8 @@ int main()
 
 			for (int i = 0; i < aaSamples; ++i)
 			{
-				Ray ray = getRayThroughPixelSuperSampled(camera, pixel_x, pixel_y, image.m_width, image.m_height);
-				rgb += colorFromRay(world, ray, tIntersectMin, tIntersectMax);
+				Ray ray = getRayThroughPixelSubSampled(camera, pixel_x, pixel_y, image.m_width, image.m_height);
+				rgb += colorFromRay(world, ray, 0, maxRayBounces, tIntersectMin, tIntersectMax);
 			}
 
 			rgb /= (float)aaSamples; // Average over aa samples.
