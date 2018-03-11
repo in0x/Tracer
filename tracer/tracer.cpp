@@ -156,11 +156,13 @@ struct Intersection
 struct Material
 {
 	typedef size_t ID;
+	// As a convention, if no light is scattered back, attenuation is set to (0, 0, 0).
 	typedef void(ScatterFunc)(const Material& material, const Intersection& interesect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation);
 
 	Vec3f m_albedo;
 	ScatterFunc* m_scatterFunc;
 	float m_roughness;
+	float m_refractIdx;
 };
 
 struct Object
@@ -334,7 +336,7 @@ void scatterDiffuse(const Material& material, const Intersection& intersect, con
 	attenuation = material.m_albedo;
 }
 
-void scatterMetal(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
+void scatterMetallic(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
 {
 	Vec3f reflected = reflect(normalized(rayIn.m_direction), intersect.m_normal);
 	rayOut = { intersect.m_point, reflected + material.m_roughness * randInUnitSphere() };
@@ -349,12 +351,89 @@ void scatterMetal(const Material& material, const Intersection& intersect, const
 	}
 }
 
+float schlick(float cosine, float refractIdx)
+{
+	float r0 = (1.0f - refractIdx) / (1.0f, refractIdx);
+	r0 *= r0;
+	return r0 + (1.0f - r0) * pow((1.0f - cosine), 5);
+}
+
+void scatterDielectric(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
+{
+	Vec3f outwardNormal;
+	Vec3f reflected = reflect(rayIn.m_direction, intersect.m_normal);
+	float ni_over_nt = 0.0f;
+	float cosine = 0.0f;
+
+	if (dot(rayIn.m_direction, intersect.m_normal) > 0.0f)
+	{
+		outwardNormal = -intersect.m_normal;
+		ni_over_nt = material.m_refractIdx;
+		cosine = material.m_refractIdx * dot(rayIn.m_direction, intersect.m_normal) / length(rayIn.m_direction);
+	}
+	else
+	{
+		outwardNormal = intersect.m_normal;
+		ni_over_nt = 1.0f / material.m_refractIdx;
+		cosine = -dot(rayIn.m_direction, intersect.m_normal) / length(rayIn.m_direction);
+	}
+	
+	float reflectChance = 1.0f;
+	attenuation = { 1.0f, 1.0f, 1.0f };
+
+	Vec3f refracted = refract(rayIn.m_direction, outwardNormal, ni_over_nt);
+	if (length2(refracted) != 0.0f)
+	{
+		reflectChance = schlick(cosine, material.m_refractIdx);
+	}
+
+	if (randDecimal() < reflectChance)
+	{
+		rayOut = { intersect.m_point, reflected };
+	}
+	else
+	{
+		rayOut = { intersect.m_point, refracted };
+	}
+}
+
+Material createDiffuse(const Vec3f& albedo)
+{
+	Material diffuse;
+	memset(&diffuse, 0, sizeof(Material));
+
+	diffuse.m_albedo = albedo;
+	diffuse.m_scatterFunc = &scatterDiffuse;
+	return diffuse;
+}
+
+Material createMetallic(const Vec3f& albedo, float roughness)
+{
+	Material metallic;
+	memset(&metallic, 0, sizeof(Material));
+
+	metallic.m_albedo = albedo;
+	metallic.m_roughness = roughness;
+	metallic.m_scatterFunc = &scatterMetallic;
+	return metallic;
+}
+
+Material createDielectric(float refractIdx)
+{
+	Material dielectirc;
+	memset(&dielectirc, 0, sizeof(Material));
+
+	dielectirc.m_refractIdx = refractIdx;
+	dielectirc.m_scatterFunc = &scatterDielectric;
+	return dielectirc;
+}
+
 int main()
 {
 	initRand();
 
-	int width = 600;
-	int height = 300;
+	int width = 1800;
+	int height = 900;
 	int components = 3;
 	Image image(width, height, components);
 
@@ -364,19 +443,21 @@ int main()
 	camera.m_horizontal = { 4.0f, 0.0f, 0.0f };
 	camera.m_vertical = { 0.0f, 2.0f, 0.0f };
 
-	const int aaSamples = 4;
+	const int pixelSubSamples = 16;
 
 	World world;
 
-	Material::ID redDiffuse = world.setDefaultMaterial({ Vec3f{ 0.8f, 0.3f, 0.3f }, &scatterDiffuse });
-	Material::ID yellowDiffuse = world.setDefaultMaterial({ Vec3f{ 0.8f, 0.8f, 0.0f }, &scatterDiffuse });
-	Material::ID silver = world.setDefaultMaterial({ Vec3f{ 0.8f, 0.8f, 0.8f }, &scatterMetal , 0.3f});
-	Material::ID gold = world.setDefaultMaterial({ Vec3f{ 0.8f, 0.6f, 0.2f }, &scatterMetal, 1.0f});
+	Material::ID blueDiffuse = world.setDefaultMaterial(createDiffuse(Vec3f{ 0.1f, 0.2f, 0.5f }));	
+	Material::ID yellowDiffuse = world.addMaterial(createDiffuse(Vec3f{ 0.8f, 0.8f, 0.0f }));	
+	Material::ID silver = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.8f, 0.8f }, 0.3f));	
+	Material::ID gold = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.6f, 0.2f }, 0.0f));	
+	Material::ID glas = world.addMaterial(createDielectric(1.5f));
 
-	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f, redDiffuse);
+	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f, blueDiffuse);
 	world.addSphere(Vec3f{ 0.0f, -100.5f, -1.0f }, 100.0f, yellowDiffuse);
 	world.addSphere(Vec3f{ 1.0f, 0.0f, -1.0f }, 0.5f, gold);
-	world.addSphere(Vec3f{ -1.0f, 0.0f, -1.0f }, 0.5f, silver);
+	world.addSphere(Vec3f{ -1.0f, 0.0f, -1.0f }, 0.5f, glas);
+	world.addSphere(Vec3f{ -1.0f, 0.0f, -1.0f }, -0.45f, glas);
 
 	const float tIntersectMin = 0.001f; // Helps with self shadowing.
 	const float tIntersectMax = FLT_MAX;
@@ -388,13 +469,13 @@ int main()
 		{
 			Vec3f rgb{ 0,0,0 };
 
-			for (int i = 0; i < aaSamples; ++i)
+			for (int i = 0; i < pixelSubSamples; ++i)
 			{
 				Ray ray = getRayThroughPixelSubSampled(camera, pixel_x, pixel_y, image.m_width, image.m_height);
 				rgb += colorFromRay(world, ray, 0, maxRayBounces, tIntersectMin, tIntersectMax);
 			}
 
-			rgb /= (float)aaSamples; // Average over aa samples.
+			rgb /= (float)pixelSubSamples; // Average over aa samples.
 			rgb.x = sqrt(rgb.x); rgb.y = sqrt(rgb.y); rgb.z = sqrt(rgb.z); // Gamma2 correct.
 			rgb *= 255.99f; // Move up to 0 <-> 255 range.
 
