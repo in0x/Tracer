@@ -160,6 +160,7 @@ struct Material
 
 	Vec3f m_albedo;
 	ScatterFunc* m_scatterFunc;
+	float m_roughness;
 };
 
 struct Object
@@ -226,16 +227,23 @@ struct World
 		m_objects.emplace_back(object);
 	}
 
-	Material::ID addMaterial(Vec3f albedo, Material::ScatterFunc* scatterFunc)
+	void sanitizeMaterial(Material::ID id)
 	{
-		m_materials.push_back({ albedo, scatterFunc }); // TODO() Why cant we use emplace_back here ...
-		return  m_materials.size() - 1;
+		Material& material = m_materials[id];
+		material.m_roughness = fmin(material.m_roughness, 1.0f);
 	}
 
-	// As with everything, consider offering move here later.
-	Material::ID setDefaultMaterial(Vec3f albedo, Material::ScatterFunc* scatterFunc)
+	Material::ID addMaterial(const Material& material)
 	{
-		m_defaultMatID = addMaterial(albedo, scatterFunc);
+		m_materials.push_back(material); 
+		Material::ID id = m_materials.size() - 1;
+		sanitizeMaterial(id);
+		return id;
+	}
+
+	Material::ID setDefaultMaterial(const Material& material)
+	{
+		m_defaultMatID = addMaterial(material);
 		return m_defaultMatID;
 	}
 };
@@ -329,7 +337,7 @@ void scatterDiffuse(const Material& material, const Intersection& intersect, con
 void scatterMetal(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
 {
 	Vec3f reflected = reflect(normalized(rayIn.m_direction), intersect.m_normal);
-	rayOut = { intersect.m_point, reflected };
+	rayOut = { intersect.m_point, reflected + material.m_roughness * randInUnitSphere() };
 
 	if (dot(rayOut.m_direction, intersect.m_normal) > 0)
 	{
@@ -360,10 +368,10 @@ int main()
 
 	World world;
 
-	Material::ID redDiffuse = world.setDefaultMaterial(Vec3f{ 0.8f, 0.3f, 0.3f }, &scatterDiffuse);
-	Material::ID yellowDiffuse = world.setDefaultMaterial(Vec3f{ 0.8f, 0.8f, 0.0f }, &scatterDiffuse);
-	Material::ID silver = world.setDefaultMaterial(Vec3f{ 0.8f, 0.8f, 0.8f }, &scatterMetal);
-	Material::ID gold = world.setDefaultMaterial(Vec3f{ 0.8f, 0.6f, 0.2f }, &scatterMetal);
+	Material::ID redDiffuse = world.setDefaultMaterial({ Vec3f{ 0.8f, 0.3f, 0.3f }, &scatterDiffuse });
+	Material::ID yellowDiffuse = world.setDefaultMaterial({ Vec3f{ 0.8f, 0.8f, 0.0f }, &scatterDiffuse });
+	Material::ID silver = world.setDefaultMaterial({ Vec3f{ 0.8f, 0.8f, 0.8f }, &scatterMetal , 0.3f});
+	Material::ID gold = world.setDefaultMaterial({ Vec3f{ 0.8f, 0.6f, 0.2f }, &scatterMetal, 1.0f});
 
 	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f, redDiffuse);
 	world.addSphere(Vec3f{ 0.0f, -100.5f, -1.0f }, 100.0f, yellowDiffuse);
