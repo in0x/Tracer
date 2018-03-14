@@ -15,6 +15,7 @@
 #define EXPAND(x) EXPAND_HELPER(x)
 #define __LOCATION_INFO__ "In: " __FILE__ "\nAt: " EXPAND(__LINE__) ", " __FUNCTION__ "() "
 #define LOG(x) printf(x __LOCATION_INFO__)
+#define PI 3.14159265358979323846
 
 void initRand()
 {
@@ -124,12 +125,33 @@ struct Camera
 	Vec3f m_vertical;
 };
 
+Camera createCamera(const Vec3f& origin, const Vec3f& viewForward, const Vec3f& viewUp, float vertFov, float aspect)
+{
+	Vec3f u, v, w;
+
+	float theta = vertFov * PI / 180.0f;
+	float halfHeight = tan(theta / 2.0f);
+	float halfWidth = aspect * halfHeight;
+
+	w = normalized(origin - viewForward);
+	u = normalized(cross(viewUp, w));
+	v = cross(w, u);
+
+	Camera camera;
+	camera.m_rayOrigin = origin;
+	camera.m_lowerLeft = origin - halfWidth * u - halfHeight * v - w;
+	camera.m_horizontal = 2.0f * halfWidth * u;
+	camera.m_vertical = 2.0f * halfHeight * v;
+
+	return camera;
+}
+
 Ray getRayThroughPixel(const Camera& camera, int pixelX, int pixelY, int widthPixels, int heightPixels)
 {
 	float u = (float)pixelX / float(widthPixels);
 	float v = (float)pixelY / float(heightPixels);
 
-	return Ray{ camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical };
+	return Ray{ camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical - camera.m_rayOrigin};
 }
 
 Ray getRayThroughPixelSubSampled(const Camera& camera, int pixelX, int pixelY, int widthPixels, int heightPixels)
@@ -137,7 +159,7 @@ Ray getRayThroughPixelSubSampled(const Camera& camera, int pixelX, int pixelY, i
 	float u = ((float)pixelX + randDecimal()) / float(widthPixels);
 	float v = ((float)pixelY + randDecimal()) / float(heightPixels);
 
-	return Ray{ camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical };
+	return Ray{ camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical - camera.m_rayOrigin };
 }
 
 struct Sphere
@@ -437,20 +459,16 @@ int main()
 	int components = 3;
 	Image image(width, height, components);
 
-	Camera camera;
-	camera.m_rayOrigin = { 0.0f, 0.0f, 0.0f };
-	camera.m_lowerLeft = { -2.0f, -1.0f, -1.0f };
-	camera.m_horizontal = { 4.0f, 0.0f, 0.0f };
-	camera.m_vertical = { 0.0f, 2.0f, 0.0f };
+	Camera camera = createCamera(Vec3f{ -2.0f, 2.0f, 1.0f }, Vec3f{ 0.0f, 0.0f, -1.0f }, Vec3f{ 0.0f, 1.0f, 0.0f }, 50.0f, (float)width / (float)height);
 
 	const int pixelSubSamples = 16;
 
 	World world;
 
-	Material::ID blueDiffuse = world.setDefaultMaterial(createDiffuse(Vec3f{ 0.1f, 0.2f, 0.5f }));	
-	Material::ID yellowDiffuse = world.addMaterial(createDiffuse(Vec3f{ 0.8f, 0.8f, 0.0f }));	
-	Material::ID silver = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.8f, 0.8f }, 0.3f));	
-	Material::ID gold = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.6f, 0.2f }, 0.0f));	
+	Material::ID blueDiffuse = world.setDefaultMaterial(createDiffuse(Vec3f{ 0.1f, 0.2f, 0.5f }));
+	Material::ID yellowDiffuse = world.addMaterial(createDiffuse(Vec3f{ 0.8f, 0.8f, 0.0f }));
+	Material::ID silver = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.8f, 0.8f }, 0.3f));
+	Material::ID gold = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.6f, 0.2f }, 0.0f));
 	Material::ID glas = world.addMaterial(createDielectric(1.5f));
 
 	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f, blueDiffuse);
