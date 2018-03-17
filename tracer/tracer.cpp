@@ -46,6 +46,19 @@ Vec3f randInUnitSphere()
 	return point;
 }
 
+Vec3f randInUnitDisk()
+{
+	Vec3f point{ 0.0f, 0.0f, 0.0f };
+
+	do 
+	{
+		point.x = randInRange(-1.0f, 1.0f);
+		point.y = randInRange(-1.0f, 1.0f);
+	} while (dot(point, point) >= 1.0f);
+
+	return point;
+}
+
 template<typename T>
 T lerp(float t, T a, T b)
 {
@@ -123,43 +136,56 @@ struct Camera
 	Vec3f m_lowerLeft;
 	Vec3f m_horizontal;
 	Vec3f m_vertical;
+
+	Vec3f baseUp; // v
+	Vec3f baseRight; // u 
+	Vec3f baseForward; // w
+
+	float m_lensRadius;
 };
 
-Camera createCamera(const Vec3f& origin, const Vec3f& viewForward, const Vec3f& viewUp, float vertFov, float aspect)
+Camera createCamera(const Vec3f& origin, const Vec3f& viewForward, const Vec3f& viewUp, float vertFov, float aspect, float aperture, float focusDist)
 {
-	Vec3f u, v, w;
-
 	float theta = vertFov * PI / 180.0f;
 	float halfHeight = tan(theta / 2.0f);
 	float halfWidth = aspect * halfHeight;
 
-	w = normalized(origin - viewForward);
-	u = normalized(cross(viewUp, w));
-	v = cross(w, u);
-
 	Camera camera;
+
+	camera.m_lensRadius = aperture / 2.0f;
+
+	camera.baseForward = normalized(origin - viewForward);
+	camera.baseRight = normalized(cross(viewUp, camera.baseForward));
+	camera.baseUp = cross(camera.baseForward, camera.baseRight);
+
 	camera.m_rayOrigin = origin;
-	camera.m_lowerLeft = origin - halfWidth * u - halfHeight * v - w;
-	camera.m_horizontal = 2.0f * halfWidth * u;
-	camera.m_vertical = 2.0f * halfHeight * v;
+	camera.m_lowerLeft = origin - halfWidth * focusDist * camera.baseRight - halfHeight * focusDist * camera.baseUp - focusDist * camera.baseForward;
+	camera.m_horizontal = 2.0f * halfWidth * focusDist * camera.baseRight;
+	camera.m_vertical = 2.0f * halfHeight * focusDist * camera.baseUp;
 
 	return camera;
+}
+
+Ray getRay(const Camera& camera, float u, float v)
+{
+	Vec3f rand2D = camera.m_lensRadius * randInUnitDisk();
+	Vec3f offset = camera.baseRight * rand2D.x + camera.baseUp * rand2D.y;
+
+	return Ray{ camera.m_rayOrigin + offset, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical - camera.m_rayOrigin - offset };
 }
 
 Ray getRayThroughPixel(const Camera& camera, int pixelX, int pixelY, int widthPixels, int heightPixels)
 {
 	float u = (float)pixelX / float(widthPixels);
 	float v = (float)pixelY / float(heightPixels);
-
-	return Ray{ camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical - camera.m_rayOrigin};
+	return getRay(camera, u, v);
 }
 
 Ray getRayThroughPixelSubSampled(const Camera& camera, int pixelX, int pixelY, int widthPixels, int heightPixels)
 {
 	float u = ((float)pixelX + randDecimal()) / float(widthPixels);
 	float v = ((float)pixelY + randDecimal()) / float(heightPixels);
-
-	return Ray{ camera.m_rayOrigin, camera.m_lowerLeft + u * camera.m_horizontal + v * camera.m_vertical - camera.m_rayOrigin };
+	return getRay(camera, u, v);
 }
 
 struct Sphere
@@ -459,7 +485,10 @@ int main()
 	int components = 3;
 	Image image(width, height, components);
 
-	Camera camera = createCamera(Vec3f{ -2.0f, 2.0f, 1.0f }, Vec3f{ 0.0f, 0.0f, -1.0f }, Vec3f{ 0.0f, 1.0f, 0.0f }, 50.0f, (float)width / (float)height);
+	Vec3f origin{ 3.0f, 3.0f, 2.0f };
+	Vec3f forward{ 0.0f, 0.0f, -1.0f };
+	Vec3f up{ 0.0f, 1.0f, 0.0f };
+	Camera camera = createCamera(origin, forward, up, 20.0f, (float)width / (float)height, 0.5f, length(origin - forward));
 
 	const int pixelSubSamples = 16;
 
@@ -468,7 +497,7 @@ int main()
 	Material::ID blueDiffuse = world.setDefaultMaterial(createDiffuse(Vec3f{ 0.1f, 0.2f, 0.5f }));
 	Material::ID yellowDiffuse = world.addMaterial(createDiffuse(Vec3f{ 0.8f, 0.8f, 0.0f }));
 	Material::ID silver = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.8f, 0.8f }, 0.3f));
-	Material::ID gold = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.6f, 0.2f }, 0.0f));
+	Material::ID gold = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.6f, 0.2f }, 0.3f));
 	Material::ID glas = world.addMaterial(createDielectric(1.5f));
 
 	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f, blueDiffuse);
