@@ -181,21 +181,23 @@ Vec3<T> reflect(const Vec3<T>& v, const Vec3<T>& n)
 
 // Returns refracted vector if refraction occurs, else 0-vector
 template<typename T>
-Vec3<T> refract(const Vec3<T>& v, const Vec3<T>& n, float ni_over_nt)
+bool refract(const Vec3<T>& v, const Vec3<T>& n, float ni_over_nt, Vec3<T>* outRefracted)
 {
 	Vec3<T> unitV = normalized(v);
 
 	T dotVN = dot(unitV, n);
 	T discriminant = 1.0f - ni_over_nt * ni_over_nt * (1.0f - dotVN * dotVN);
 
-	Vec3<T> refracted{ 0.0f, 0.0f, 0.0f };	
-
 	if (discriminant > 0.0f)
 	{
-		refracted = ni_over_nt * (unitV - n * dotVN) - n * sqrt(discriminant);
+		*outRefracted = ni_over_nt * (unitV - n * dotVN) - n * sqrt(discriminant);
+		return true;
 	}
-
-	return refracted;
+	else
+	{
+		return false;
+	}
 }
+
 
 typedef Vec3<float> Vec3f;

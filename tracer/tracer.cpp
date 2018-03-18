@@ -24,12 +24,12 @@ void initRand()
 
 float randDecimal()
 {
-	return (float)rand() / (float)RAND_MAX;
+	return (float)rand() / ((float)RAND_MAX + 1.0f);
 }
 
 float randInRange(float min, float max)
 {
-	return (((float)rand() - min) / (float)RAND_MAX) * (max - min) + min;
+	return (((float)rand() - min) / ((float)RAND_MAX + 1.0f)) * (max - min) + min;
 }
 
 Vec3f randInUnitSphere()
@@ -50,7 +50,7 @@ Vec3f randInUnitDisk()
 {
 	Vec3f point{ 0.0f, 0.0f, 0.0f };
 
-	do 
+	do
 	{
 		point.x = randInRange(-1.0f, 1.0f);
 		point.y = randInRange(-1.0f, 1.0f);
@@ -144,7 +144,7 @@ struct Camera
 	float m_lensRadius;
 };
 
-Camera createCamera(const Vec3f& origin, const Vec3f& viewForward, const Vec3f& viewUp, float vertFov, float aspect, float aperture, float focusDist)
+Camera createCamera(const Vec3f& origin, const Vec3f& viewLookAt, const Vec3f& viewUp, float vertFov, float aspect, float aperture, float focusDist)
 {
 	float theta = vertFov * PI / 180.0f;
 	float halfHeight = tan(theta / 2.0f);
@@ -154,7 +154,7 @@ Camera createCamera(const Vec3f& origin, const Vec3f& viewForward, const Vec3f& 
 
 	camera.m_lensRadius = aperture / 2.0f;
 
-	camera.baseForward = normalized(origin - viewForward);
+	camera.baseForward = normalized(origin - viewLookAt);
 	camera.baseRight = normalized(cross(viewUp, camera.baseForward));
 	camera.baseUp = cross(camera.baseForward, camera.baseRight);
 
@@ -239,6 +239,7 @@ Intersection intersectSphere(const Sphere& sphere, const Ray& ray)
 	float discriminant = b * b - a * c;
 
 	Intersection intersect;
+	memset(&intersect, 0, sizeof(intersect));
 
 	if (discriminant > 0.0f)
 	{
@@ -285,7 +286,7 @@ struct World
 
 	Material::ID addMaterial(const Material& material)
 	{
-		m_materials.push_back(material); 
+		m_materials.push_back(material);
 		Material::ID id = m_materials.size() - 1;
 		sanitizeMaterial(id);
 		return id;
@@ -317,7 +318,7 @@ Intersection intersectObject(const Object& object, const Ray& ray)
 	return intersect;
 }
 
-const Object* intersectWorld(const World& world, const Ray& ray, Intersection& outIntersect, float tMin, float tMax)
+const Object* intersectWorld(const World& world, const Ray& ray, Intersection* outIntersect, float tMin, float tMax)
 {
 	Intersection intersect;
 	const Object* hitObject = nullptr;
@@ -330,7 +331,7 @@ const Object* intersectWorld(const World& world, const Ray& ray, Intersection& o
 
 		if (intersect.m_tAt > tMin && intersect.m_tAt < closestT)
 		{
-			outIntersect = intersect;
+			*outIntersect = intersect;
 			hitObject = &object;
 			closestT = intersect.m_tAt;
 		}
@@ -350,11 +351,12 @@ Vec3f getSkyColor(const Ray& ray)
 	return lerp(t, white, skyBlue);
 }
 
-Vec3f colorFromRay(const World& world, const Ray& ray, int bounces, int maxBounces, float tMin, float tMax)
+Vec3f colorFromRay(const World& world, const Ray& ray, int bounces, const int maxBounces, const float tMin, const float tMax)
 {
 	Intersection intersect;
+	memset(&intersect, 0, sizeof(intersect));
 
-	if (const Object* hitObject = intersectWorld(world, ray, intersect, tMin, tMax))
+	if (const Object* hitObject = intersectWorld(world, ray, &intersect, tMin, tMax))
 	{
 		const Material& material = world.m_materials[hitObject->m_materialID];
 
@@ -401,7 +403,7 @@ void scatterMetallic(const Material& material, const Intersection& intersect, co
 
 float schlick(float cosine, float refractIdx)
 {
-	float r0 = (1.0f - refractIdx) / (1.0f, refractIdx);
+	float r0 = (1.0f - refractIdx) / (1.0f + refractIdx);
 	r0 *= r0;
 	return r0 + (1.0f - r0) * pow((1.0f - cosine), 5);
 }
@@ -409,15 +411,18 @@ float schlick(float cosine, float refractIdx)
 void scatterDielectric(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray* rayOut, Vec3f* attenuation)
 {
 	Vec3f outwardNormal;
-	Vec3f reflected = reflect(rayIn.m_direction, intersect.m_normal);
 	float ni_over_nt = 0.0f;
 	float cosine = 0.0f;
+
+	float d = dot(rayIn.m_direction, intersect.m_normal);
 
 	if (dot(rayIn.m_direction, intersect.m_normal) > 0.0f)
 	{
 		outwardNormal = -intersect.m_normal;
 		ni_over_nt = material.m_refractIdx;
-		cosine = material.m_refractIdx * dot(rayIn.m_direction, intersect.m_normal) / length(rayIn.m_direction);
+		
+		cosine = dot(rayIn.m_direction, intersect.m_normal) / length(rayIn.m_direction);
+		cosine = sqrt(1.0f - material.m_refractIdx * material.m_refractIdx * (1.0f - cosine * cosine));
 	}
 	else
 	{
@@ -425,18 +430,19 @@ void scatterDielectric(const Material& material, const Intersection& intersect, 
 		ni_over_nt = 1.0f / material.m_refractIdx;
 		cosine = -dot(rayIn.m_direction, intersect.m_normal) / length(rayIn.m_direction);
 	}
-	
+
 	float reflectChance = 1.0f;
 	*attenuation = { 1.0f, 1.0f, 1.0f };
 
-	Vec3f refracted = refract(rayIn.m_direction, outwardNormal, ni_over_nt);
-	if (length2(refracted) != 0.0f)
+	Vec3f refracted{0.0f, 0.0f, 0.0f};
+	if (refract(rayIn.m_direction, outwardNormal, ni_over_nt, &refracted))
 	{
 		reflectChance = schlick(cosine, material.m_refractIdx);
 	}
-
+	
 	if (randDecimal() < reflectChance)
 	{
+		Vec3f reflected = reflect(rayIn.m_direction, intersect.m_normal);
 		*rayOut = { intersect.m_point, reflected };
 	}
 	else
@@ -478,45 +484,79 @@ Material createDielectric(float refractIdx)
 
 void randomFillWorld(World* world)
 {
+	world->setDefaultMaterial(createDiffuse(Vec3f{ 0.5f, 0.5f, 0.5f }));
+	world->addSphere(Vec3f{ 0.0f, -1000.0f, 0.0f }, 1000.0f);
+
+	for (float a = -11.0f; a < 11.0f; a++)
+	{
+		for (float b = -11.0f; b < 11.0f; b++)
+		{
+			float choose_mat = randDecimal();
+
+			Vec3f center{ a + 0.9f * randDecimal(), 0.2f, b + 0.9f * randDecimal() };
+
+			if (length((center - Vec3f{ 4.0f, 0.2f, 0.0f })) > 0.9f)
+			{
+				if (choose_mat < 0.8f)
+				{
+					Material diffuse = createDiffuse(Vec3f{ randDecimal() * randDecimal(), randDecimal() * randDecimal(), randDecimal() * randDecimal() });
+					world->addSphere(center, 0.2f, world->addMaterial(diffuse));
+				}
+				else if (choose_mat < 0.95f)
+				{
+					Vec3f albedo{ randInRange(0.5f, 1.0f), randInRange(0.5f, 1.0f), randInRange(0.5f, 1.0f) };
+					float roughness = randInRange(0.0f, 0.5f);
+					Material metal = createMetallic(albedo, roughness);
+
+					world->addSphere(center, 0.2f, world->addMaterial(metal));
+				}
+				else
+				{
+					Material glass = createDielectric(1.5f);
+					world->addSphere(center, 0.2f, world->addMaterial(glass));
+				}
+			}
+		}
+	}
+
+	Material diffuse = createDiffuse(Vec3f{ 0.4f, 0.2f, 0.1f });
+	world->addSphere(Vec3f{ -4.0f, 1.0f, 0.0f }, 1.0f, world->addMaterial(diffuse));
+
+	Material metal = createMetallic(Vec3f{ 0.7f, 0.6f, 0.5f }, 0.0f);
+	world->addSphere(Vec3f{ 4.0f, 1.0f, 0.0f }, 1.0f, world->addMaterial(metal));
+
+	Material glass = createDielectric(1.5f);
+	world->addSphere(Vec3f{0.0f, 1.0f, 0.0f}, 1.0f, world->addMaterial(glass));
 }
 
 int main()
 {
 	initRand();
 
-	int width = 1800;
-	int height = 900;
-	int components = 3;
+	//uint32_t width = 1200;
+	//uint32_t height = 800;
+	uint32_t width = 600;
+	uint32_t height = 300; 
+	uint32_t components = 3;
 	Image image(width, height, components);
 
-	Vec3f origin{ 3.0f, 3.0f, 2.0f };
-	Vec3f forward{ 0.0f, 0.0f, -1.0f };
+	Vec3f origin{ 13.0f, 2.0f, 3.0f };
+	Vec3f lookAt{ 0.0f, 0.0f, 0.0f };
 	Vec3f up{ 0.0f, 1.0f, 0.0f };
-	Camera camera = createCamera(origin, forward, up, 20.0f, (float)width / (float)height, 0.5f, length(origin - forward));
-
-	const int pixelSubSamples = 16;
+	Camera camera = createCamera(origin, lookAt, up, 20.0f, (float)width / (float)height, 0.1f, 10.0f);
+	
+	const int pixelSubSamples = 8;
 
 	World world;
-
-	Material::ID blueDiffuse = world.setDefaultMaterial(createDiffuse(Vec3f{ 0.1f, 0.2f, 0.5f }));
-	Material::ID yellowDiffuse = world.addMaterial(createDiffuse(Vec3f{ 0.8f, 0.8f, 0.0f }));
-	Material::ID silver = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.8f, 0.8f }, 0.3f));
-	Material::ID gold = world.addMaterial(createMetallic(Vec3f{ 0.8f, 0.6f, 0.2f }, 0.3f));
-	Material::ID glas = world.addMaterial(createDielectric(1.5f));
-
-	world.addSphere(Vec3f{ 0.0f, 0.0f, -1.0f }, 0.5f, blueDiffuse);
-	world.addSphere(Vec3f{ 0.0f, -100.5f, -1.0f }, 100.0f, yellowDiffuse);
-	world.addSphere(Vec3f{ 1.0f, 0.0f, -1.0f }, 0.5f, gold);
-	world.addSphere(Vec3f{ -1.0f, 0.0f, -1.0f }, 0.5f, glas);
-	world.addSphere(Vec3f{ -1.0f, 0.0f, -1.0f }, -0.45f, glas);
+	randomFillWorld(&world);
 
 	const float tIntersectMin = 0.001f; // Helps with self shadowing.
 	const float tIntersectMax = FLT_MAX;
 	const int maxRayBounces = 50;
 
-	for (int pixel_y = 0; pixel_y < height; ++pixel_y)
+	for (uint32_t pixel_y = 0; pixel_y < height; ++pixel_y)
 	{
-		for (int pixel_x = 0; pixel_x < width; ++pixel_x)
+		for (uint32_t pixel_x = 0; pixel_x < width; ++pixel_x)
 		{
 			Vec3f rgb{ 0,0,0 };
 
