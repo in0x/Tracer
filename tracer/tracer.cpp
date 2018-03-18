@@ -199,6 +199,7 @@ struct Intersection
 	float m_tAt;
 	Vec3f m_point;
 	Vec3f m_normal;
+	bool m_bHit;
 };
 
 struct Material
@@ -228,7 +229,7 @@ struct Object
 	Material::ID m_materialID;
 };
 
-Intersection intersectSphere(const Sphere& sphere, const Ray& ray)
+Intersection intersectSphere(const Sphere& sphere, const Ray& ray, const float tMin, const float tMax)
 {
 	Vec3f toCenter = ray.m_origin - sphere.m_position;
 
@@ -240,18 +241,29 @@ Intersection intersectSphere(const Sphere& sphere, const Ray& ray)
 
 	Intersection intersect;
 	memset(&intersect, 0, sizeof(intersect));
+	intersect.m_bHit = false;
 
 	if (discriminant > 0.0f)
 	{
-		intersect.m_tAt = (-b - sqrt(discriminant)) / a;
-		intersect.m_point = pointAt(ray, intersect.m_tAt);
-		intersect.m_normal = (intersect.m_point - sphere.m_position) / sphere.m_radius;
-	}
-	else
-	{
-		intersect.m_tAt = -1.0f;
-	}
+		float tNeg = (-b - sqrt(discriminant)) / a;
+		float tPos = (-b + sqrt(discriminant)) / a;
 
+		if (tNeg > tMin && tNeg < tMax)
+		{
+			intersect.m_tAt = tNeg;
+			intersect.m_point = pointAt(ray, intersect.m_tAt);
+			intersect.m_normal = (intersect.m_point - sphere.m_position) / sphere.m_radius;
+			intersect.m_bHit = true;
+		}	
+		else if (tPos > tMin && tPos < tMax)
+		{
+			intersect.m_tAt = tPos;
+			intersect.m_point = pointAt(ray, intersect.m_tAt);
+			intersect.m_normal = (intersect.m_point - sphere.m_position) / sphere.m_radius;
+			intersect.m_bHit = true;
+		}
+	}
+	
 	return intersect;
 }
 
@@ -299,14 +311,14 @@ struct World
 	}
 };
 
-Intersection intersectObject(const Object& object, const Ray& ray)
+Intersection intersectObject(const Object& object, const Ray& ray, const float tMin, const float tMax)
 {
 	Intersection intersect;
 
 	switch (object.m_collisionType)
 	{
 	case Object::COL_SPHERE:
-		intersect = intersectSphere(object.m_collision.sphere, ray);
+		intersect = intersectSphere(object.m_collision.sphere, ray, tMin, tMax);
 		break;
 
 	default:
@@ -327,9 +339,9 @@ const Object* intersectWorld(const World& world, const Ray& ray, Intersection* o
 
 	for (const Object& object : world.m_objects)
 	{
-		intersect = intersectObject(object, ray);
+		intersect = intersectObject(object, ray, tMin, closestT);
 
-		if (intersect.m_tAt > tMin && intersect.m_tAt < closestT)
+		if (intersect.m_bHit)
 		{
 			*outIntersect = intersect;
 			hitObject = &object;
@@ -413,8 +425,6 @@ void scatterDielectric(const Material& material, const Intersection& intersect, 
 	Vec3f outwardNormal;
 	float ni_over_nt = 0.0f;
 	float cosine = 0.0f;
-
-	float d = dot(rayIn.m_direction, intersect.m_normal);
 
 	if (dot(rayIn.m_direction, intersect.m_normal) > 0.0f)
 	{
@@ -533,10 +543,8 @@ int main()
 {
 	initRand();
 
-	//uint32_t width = 1200;
-	//uint32_t height = 800;
-	uint32_t width = 600;
-	uint32_t height = 300; 
+	uint32_t width = 1200;
+	uint32_t height = 800;
 	uint32_t components = 3;
 	Image image(width, height, components);
 
@@ -545,12 +553,12 @@ int main()
 	Vec3f up{ 0.0f, 1.0f, 0.0f };
 	Camera camera = createCamera(origin, lookAt, up, 20.0f, (float)width / (float)height, 0.1f, 10.0f);
 	
-	const int pixelSubSamples = 8;
+	const int pixelSubSamples = 16;
 
 	World world;
 	randomFillWorld(&world);
 
-	const float tIntersectMin = 0.001f; // Helps with self shadowing.
+	const float tIntersectMin = 0.001f; 
 	const float tIntersectMax = FLT_MAX;
 	const int maxRayBounces = 50;
 
