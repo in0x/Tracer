@@ -205,7 +205,7 @@ struct Material
 {
 	typedef size_t ID;
 	// As a convention, if no light is scattered back, attenuation is set to (0, 0, 0).
-	typedef void(ScatterFunc)(const Material& material, const Intersection& interesect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation);
+	typedef void(ScatterFunc)(const Material& material, const Intersection& interesect, const Ray& rayIn, Ray* rayOut, Vec3f* attenuation);
 
 	Vec3f m_albedo;
 	ScatterFunc* m_scatterFunc;
@@ -360,7 +360,7 @@ Vec3f colorFromRay(const World& world, const Ray& ray, int bounces, int maxBounc
 
 		Ray scattered;
 		Vec3f attenuation;
-		material.m_scatterFunc(material, intersect, ray, scattered, attenuation);
+		material.m_scatterFunc(material, intersect, ray, &scattered, &attenuation);
 
 		if (bounces < maxBounces && length2(attenuation) > 0.0f)
 		{
@@ -377,25 +377,25 @@ Vec3f colorFromRay(const World& world, const Ray& ray, int bounces, int maxBounc
 	}
 }
 
-void scatterDiffuse(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
+void scatterDiffuse(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray* rayOut, Vec3f* attenuation)
 {
 	Vec3f target = intersect.m_point + intersect.m_normal + randInUnitSphere();
-	rayOut = { intersect.m_point, target - intersect.m_point };
-	attenuation = material.m_albedo;
+	*rayOut = { intersect.m_point, target - intersect.m_point };
+	*attenuation = material.m_albedo;
 }
 
-void scatterMetallic(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
+void scatterMetallic(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray* rayOut, Vec3f* attenuation)
 {
 	Vec3f reflected = reflect(normalized(rayIn.m_direction), intersect.m_normal);
-	rayOut = { intersect.m_point, reflected + material.m_roughness * randInUnitSphere() };
+	*rayOut = { intersect.m_point, reflected + material.m_roughness * randInUnitSphere() };
 
-	if (dot(rayOut.m_direction, intersect.m_normal) > 0)
+	if (dot(rayOut->m_direction, intersect.m_normal) > 0)
 	{
-		attenuation = material.m_albedo;
+		*attenuation = material.m_albedo;
 	}
 	else
 	{
-		attenuation = { 0.0f, 0.0f, 0.0f };
+		*attenuation = { 0.0f, 0.0f, 0.0f };
 	}
 }
 
@@ -406,7 +406,7 @@ float schlick(float cosine, float refractIdx)
 	return r0 + (1.0f - r0) * pow((1.0f - cosine), 5);
 }
 
-void scatterDielectric(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray& rayOut, Vec3f& attenuation)
+void scatterDielectric(const Material& material, const Intersection& intersect, const Ray& rayIn, Ray* rayOut, Vec3f* attenuation)
 {
 	Vec3f outwardNormal;
 	Vec3f reflected = reflect(rayIn.m_direction, intersect.m_normal);
@@ -427,7 +427,7 @@ void scatterDielectric(const Material& material, const Intersection& intersect, 
 	}
 	
 	float reflectChance = 1.0f;
-	attenuation = { 1.0f, 1.0f, 1.0f };
+	*attenuation = { 1.0f, 1.0f, 1.0f };
 
 	Vec3f refracted = refract(rayIn.m_direction, outwardNormal, ni_over_nt);
 	if (length2(refracted) != 0.0f)
@@ -437,11 +437,11 @@ void scatterDielectric(const Material& material, const Intersection& intersect, 
 
 	if (randDecimal() < reflectChance)
 	{
-		rayOut = { intersect.m_point, reflected };
+		*rayOut = { intersect.m_point, reflected };
 	}
 	else
 	{
-		rayOut = { intersect.m_point, refracted };
+		*rayOut = { intersect.m_point, refracted };
 	}
 }
 
@@ -474,6 +474,10 @@ Material createDielectric(float refractIdx)
 	dielectirc.m_refractIdx = refractIdx;
 	dielectirc.m_scatterFunc = &scatterDielectric;
 	return dielectirc;
+}
+
+void randomFillWorld(World* world)
+{
 }
 
 int main()
