@@ -5,10 +5,19 @@
       <UniqueIdentifier>{4FC737F1-C7A5-4376-A066-2A32D752A2FF}</UniqueIdentifier>
       <Extensions>cpp;c;cc;cxx;def;odl;idl;hpj;bat;asm;asmx</Extensions>
     </Filter>
+    <Filter Include="src\enkiTS">
+      <UniqueIdentifier>{6b44ded6-2c9a-4bc3-aa6f-f6a3ccb9df42}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="tracer.cpp">
       <Filter>src</Filter>
+    </ClCompile>
+    <ClCompile Include="enkiTS\TaskScheduler.cpp">
+      <Filter>src\enkiTS</Filter>
+    </ClCompile>
+    <ClCompile Include="enkiTS\TaskScheduler_c.cpp">
+      <Filter>src\enkiTS</Filter>
     </ClCompile>
   </ItemGroup>
   <ItemGroup>
@@ -17,6 +26,21 @@
     </ClInclude>
     <ClInclude Include="Vec3.h">
       <Filter>src</Filter>
+    </ClInclude>
+    <ClInclude Include="enkiTS\Atomics.h">
+      <Filter>src\enkiTS</Filter>
+    </ClInclude>
+    <ClInclude Include="enkiTS\LockLessMultiReadPipe.h">
+      <Filter>src\enkiTS</Filter>
+    </ClInclude>
+    <ClInclude Include="enkiTS\TaskScheduler.h">
+      <Filter>src\enkiTS</Filter>
+    </ClInclude>
+    <ClInclude Include="enkiTS\TaskScheduler_c.h">
+      <Filter>src\enkiTS</Filter>
+    </ClInclude>
+    <ClInclude Include="enkiTS\Threads.h">
+      <Filter>src\enkiTS</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>

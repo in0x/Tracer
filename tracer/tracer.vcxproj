@@ -142,9 +142,16 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClCompile Include="enkiTS\TaskScheduler.cpp" />
+    <ClCompile Include="enkiTS\TaskScheduler_c.cpp" />
     <ClCompile Include="tracer.cpp" />
   </ItemGroup>
   <ItemGroup>
+    <ClInclude Include="enkiTS\Atomics.h" />
+    <ClInclude Include="enkiTS\LockLessMultiReadPipe.h" />
+    <ClInclude Include="enkiTS\TaskScheduler.h" />
+    <ClInclude Include="enkiTS\TaskScheduler_c.h" />
+    <ClInclude Include="enkiTS\Threads.h" />
     <ClInclude Include="stb_image_write.h" />
     <ClInclude Include="Vec3.h" />
   </ItemGroup>

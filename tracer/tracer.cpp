@@ -6,10 +6,16 @@
 #include "stb_image_write.h"
 #include "Vec3.h"
 
+#include "enkiTS/TaskScheduler_c.h"
+
 #include <stdint.h>
 #include <assert.h>
 #include <time.h>
 #include <vector>
+
+#ifdef max
+#undef max
+#endif
 
 #define EXPAND_HELPER(x) #x
 #define EXPAND(x) EXPAND_HELPER(x)
@@ -539,51 +545,103 @@ void randomFillWorld(World* world)
 	world->addSphere(Vec3f{0.0f, 1.0f, 0.0f}, 1.0f, world->addMaterial(glass));
 }
 
+void Trace()
+{
+}
+
+enkiTaskScheduler* g_taskScheduler;
+
+void initTS()
+{
+	g_taskScheduler = enkiNewTaskScheduler();
+	enkiInitTaskScheduler(g_taskScheduler);
+}
+
+void shutdownTS()
+{
+	enkiDeleteTaskScheduler(g_taskScheduler);
+}
+
+struct RayTraceJobData
+{
+	RayTraceJobData(const Camera* camera, const World* world, Image* image)
+		: m_camera(camera)
+		, m_world(world)
+		, m_image(image)
+	{}
+
+	const Camera* m_camera;
+	const World* m_world;
+	Image* m_image; 
+};
+
+static void RunRayTraceJob(uint32_t start, uint32_t end, uint32_t threadnum, void* data)
+{
+	RayTraceJobData* job = (RayTraceJobData*)data;
+
+	uint32_t width = job->m_image->m_width;
+	uint32_t height = job->m_image->m_height;
+
+	const float tIntersectMin = 0.001f;
+	const float tIntersectMax = FLT_MAX;
+	const int maxRayBounces = 50;
+	const int pixelSubSamples = 16;
+
+	//printf("RayTraceJob: THREAD ID -> %d | START -> %d | END -> %d | SIZE -> %d \n", threadnum, start, end, (end - start));
+
+	// Pixels are numbered row-wise, starting in the top left.
+
+	for (uint32_t pixel = start; pixel < end; ++pixel)
+	{
+		uint32_t pixel_y = pixel / width;
+		uint32_t pixel_x = pixel - (pixel_y * width);
+
+		Vec3f rgb{ 0,0,0 };
+
+		for (int i = 0; i < pixelSubSamples; ++i)
+		{
+			Ray ray = getRayThroughPixelSubSampled(*job->m_camera, pixel_x, pixel_y, width, height);
+			rgb += colorFromRay(*job->m_world, ray, 0, maxRayBounces, tIntersectMin, tIntersectMax);
+		}
+
+		rgb /= (float)pixelSubSamples; // Average over aa samples.
+		rgb.x = sqrt(rgb.x); rgb.y = sqrt(rgb.y); rgb.z = sqrt(rgb.z); // Gamma2 correct.
+		rgb *= 255.99f; // Move up to 0 <-> 255 range.
+
+		job->m_image->writePixel(pixel_x, (height - 1) - pixel_y, rgb.x, rgb.y, rgb.z);
+	}
+}
+
 int main()
 {
 	initRand();
 
-	uint32_t width = 1200;
-	uint32_t height = 800;
+	initTS();
+	
+	uint32_t width = 1920;
+	uint32_t height = 1080;
 	uint32_t components = 3;
 	Image image(width, height, components);
 
 	Vec3f origin{ 13.0f, 2.0f, 3.0f };
 	Vec3f lookAt{ 0.0f, 0.0f, 0.0f };
 	Vec3f up{ 0.0f, 1.0f, 0.0f };
-	Camera camera = createCamera(origin, lookAt, up, 20.0f, (float)width / (float)height, 0.1f, 10.0f);
+	Camera camera = createCamera(origin, lookAt, up, 20.0f, (float)width / (float)height, 0.01f, 10.0f);
 	
-	const int pixelSubSamples = 16;
-
 	World world;
 	randomFillWorld(&world);
+	
+	RayTraceJobData jobData(&camera, &world, &image);
 
-	const float tIntersectMin = 0.001f; 
-	const float tIntersectMax = FLT_MAX;
-	const int maxRayBounces = 50;
-
-	for (uint32_t pixel_y = 0; pixel_y < height; ++pixel_y)
-	{
-		for (uint32_t pixel_x = 0; pixel_x < width; ++pixel_x)
-		{
-			Vec3f rgb{ 0,0,0 };
-
-			for (int i = 0; i < pixelSubSamples; ++i)
-			{
-				Ray ray = getRayThroughPixelSubSampled(camera, pixel_x, pixel_y, image.m_width, image.m_height);
-				rgb += colorFromRay(world, ray, 0, maxRayBounces, tIntersectMin, tIntersectMax);
-			}
-
-			rgb /= (float)pixelSubSamples; // Average over aa samples.
-			rgb.x = sqrt(rgb.x); rgb.y = sqrt(rgb.y); rgb.z = sqrt(rgb.z); // Gamma2 correct.
-			rgb *= 255.99f; // Move up to 0 <-> 255 range.
-
-			image.writePixel(pixel_x, (height - 1) - pixel_y, rgb.x, rgb.y, rgb.z);
-		}
-	}
+	enkiTaskSet* task = enkiCreateTaskSet(g_taskScheduler, RunRayTraceJob);
+	enkiAddTaskSetToPipeMinRange(g_taskScheduler, task, &jobData, width * height, width);
+	enkiWaitForTaskSet(g_taskScheduler, task);
 
 	bool bWasWritten = image.save("render.png");
 	assert(bWasWritten);
+
+	enkiDeleteTaskSet(task);
+	shutdownTS();
 
 	return 0;
 }
