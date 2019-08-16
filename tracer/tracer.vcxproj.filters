@@ -27,9 +27,6 @@
     <ClInclude Include="Vec3.h">
       <Filter>src</Filter>
     </ClInclude>
-    <ClInclude Include="enkiTS\Atomics.h">
-      <Filter>src\enkiTS</Filter>
-    </ClInclude>
     <ClInclude Include="enkiTS\LockLessMultiReadPipe.h">
       <Filter>src\enkiTS</Filter>
     </ClInclude>
@@ -37,9 +34,6 @@
       <Filter>src\enkiTS</Filter>
     </ClInclude>
     <ClInclude Include="enkiTS\TaskScheduler_c.h">
-      <Filter>src\enkiTS</Filter>
-    </ClInclude>
-    <ClInclude Include="enkiTS\Threads.h">
       <Filter>src\enkiTS</Filter>
     </ClInclude>
   </ItemGroup>
