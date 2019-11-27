@@ -842,7 +842,8 @@ struct RayTraceJobData
 
 	const Camera* m_camera;
 	const World* m_world;
-	Image* m_image; 
+	Image* m_image;
+	//float* m_dataBlocks;
 };
 
 static void RunRayTraceJob(uint32_t start, uint32_t end, uint32_t threadnum, void* data)
@@ -855,9 +856,9 @@ static void RunRayTraceJob(uint32_t start, uint32_t end, uint32_t threadnum, voi
 	const float tIntersectMin = 0.001f;
 	const float tIntersectMax = FLT_MAX;
 	const int maxRayBounces = 50;
-	const int pixelSubSamples = 8;
+	const int pixelSubSamples = 4;
 
-	//printf("RayTraceJob: THREAD ID -> %d | START -> %d | END -> %d | SIZE -> %d \n", threadnum, start, end, (end - start));
+	printf("RayTraceJob: THREAD ID -> %d | START -> %d | END -> %d | SIZE -> %d \n", threadnum, start, end, (end - start));
 
 	// Pixels are numbered row-wise, starting in the top left.
 
@@ -885,7 +886,6 @@ static void RunRayTraceJob(uint32_t start, uint32_t end, uint32_t threadnum, voi
 int main()
 {
 	initRand();
-
 	initTS();
 	
 	uint32_t width = 1920;
@@ -917,6 +917,8 @@ int main()
 	RunRayTraceJob(0, width * height, 0, (void*)&jobData);
 #endif
 
+	//todo(pgPW): Eliminate false sharing (allocate a data block for each job size)
+
 	printf("Done rendering.\n");
 
 	char img[1024];
@@ -931,7 +933,9 @@ int main()
 	printf("Done saving.\n");
 	printf("Shutting down TS.\n");
 
+#if MULTITHREADED
 	enkiDeleteTaskSet(task);
+#endif
 	shutdownTS();
 
 	printf("Finished shutting down TS.\n");
